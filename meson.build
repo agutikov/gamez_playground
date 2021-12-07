@@ -28,12 +28,21 @@ if cc.get_id() == 'emscripten'
     'PLATFORM': 'Web',
   })
 else
-  # raylib_opts.add_cmake_defines({
-  #   'PLATFORM': 'Desktop',
-  # })
+  raylib_opts.add_cmake_defines({
+    'PLATFORM': 'Desktop',
+    'USE_EXTERNAL_GLFW': 'ON'
+  })
 endif
 raylib_subproject = cmake.subproject('raylib', options: raylib_opts)
 dependencies += raylib_subproject.dependency('raylib')
+
+
+# GLFW configuration
+#glfw_opts = cmake.subproject_options()
+#glfw_opts.set_install(false)
+#glfw_subproject = cmake.subproject('glfw', options: glfw_opts)
+#dependencies += glfw_subproject.dependency('glfw3')
+
 
 # General configuration
 if host_machine.system() == 'windows'
