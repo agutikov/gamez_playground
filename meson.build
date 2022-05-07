@@ -85,3 +85,17 @@ executable('playground',
   link_args: link_args,
   name_suffix: name_suffix,
 )
+
+atomic_gas_sources = files(
+  'src/2d_atomic_gas.cpp',
+)
+
+executable('2d_atomic_gas',
+  atomic_gas_sources,
+  c_args: c_args,
+  cpp_args: cpp_args,
+  dependencies: dependencies,
+  include_directories: inc_dir,
+  link_args: link_args,
+  name_suffix: name_suffix,
+)

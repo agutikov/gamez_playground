@@ -31,3 +31,4 @@
 *.out
 *.app
 .cache
+compile_commands.json

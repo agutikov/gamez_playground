@@ -202,8 +202,9 @@ int main(void)
         DrawText("- Space to jump", 40, 60, 10, DARKGRAY);
         DrawText("- Mouse Wheel to Zoom in-out, R to reset zoom", 40, 80, 10, DARKGRAY);
         DrawText("- C to change camera mode", 40, 100, 10, DARKGRAY);
-        DrawText("Current camera mode:", 20, 120, 10, BLACK);
-        DrawText(cameraDescriptions[cameraOption], 40, 140, 10, DARKGRAY);
+        DrawText("- F11 toggle fullscreen", 40, 120, 10, DARKGRAY);
+        DrawText("Current camera mode:", 20, 140, 10, BLACK);
+        DrawText(cameraDescriptions[cameraOption], 40, 160, 10, DARKGRAY);
 
         EndDrawing();
         //----------------------------------------------------------------------------------
