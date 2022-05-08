@@ -7,6 +7,10 @@
 #include <cmath>
 #include <random>
 #include <string>
+#include <sstream>
+#include <iomanip>
+#include <iostream>
+#include <chrono>
 
 
 struct Block
@@ -55,103 +59,232 @@ std::vector<Block> Box(Vector2 A, float w, float h, Color c, float thickness)
     };
 }
 
-////////////////////////////////////////////////////////////////////////////////
-
-
-float gradient_radius = 10;
-uint8_t gradient_center_opacity = 255;
-uint8_t gradient_edge_opacity = 0;
-
-size_t grid_size = 5;
-size_t grid_width = grid_size*2;
-size_t grid_height = grid_size*2;
-
-float spacing = 2;
-
-float boiler_width = 2*gradient_radius*grid_width*spacing;
-float boiler_height = 2*gradient_radius*grid_height*spacing;
-
-float window_width = boiler_width;
-float window_height = boiler_height;
-
-float MODEL_SCALE = 100.0;
-
-
-float T_MAX =  573.15 * MODEL_SCALE;
-float T_MIN =  273.15 * MODEL_SCALE;
-
-
-size_t ATOM_NUMBER = grid_width*grid_height;
-
-
-// 3*k/m
-float KM = 0.3;
-
-float g_acc = 5*9.81/MODEL_SCALE;
-
-float DT = 1;
-
-bool show_density = false;
-size_t max_fps = 120;
-
-bool debug_mode = false;
-
 
 ////////////////////////////////////////////////////////////////////////////////
 
+
+Vector2 invert(Vector2 a)
+{
+    return {-a.x, -a.y};
+}
+
+Vector2& operator+= (Vector2& lhs, const Vector2& rhs)
+{
+    lhs.x += rhs.x;
+    lhs.y += rhs.y;
+    return lhs;
+}
+
+Vector2& operator-= (Vector2& lhs, const Vector2& rhs)
+{
+    lhs.x -= rhs.x;
+    lhs.y -= rhs.y;
+    return lhs;
+}
+
+Vector2& operator*= (Vector2& lhs, float rhs)
+{
+    lhs.x *= rhs;
+    lhs.y *= rhs;
+    return lhs;
+}
+
+Vector2& operator/= (Vector2& lhs, float rhs)
+{
+    lhs.x /= rhs;
+    lhs.y /= rhs;
+    return lhs;
+}
+
+Vector2 operator+ (Vector2 lhs, Vector2 rhs)
+{
+    lhs += rhs;
+    return lhs;
+}
+
+Vector2 operator- (Vector2 lhs, Vector2 rhs)
+{
+    lhs -= rhs;
+    return lhs;
+}
+
+Vector2 operator* (Vector2 lhs, float rhs)
+{
+    lhs *= rhs;
+    return lhs;
+}
+
+Vector2 operator/ (Vector2 lhs, float rhs)
+{
+    lhs /= rhs;
+    return lhs;
+}
+
+
+float dot(Vector2 a, Vector2 b)
+{
+    return a.x*b.x + a.y*b.y;
+}
+
+float length2(Vector2 a)
+{
+    return dot(a, a);
+}
+
+float length(Vector2 a)
+{
+    return sqrtf(length2(a));
+}
+
+float distance2(Vector2 a, Vector2 b)
+{
+    return length2(a - b);
+}
+
+float distance(Vector2 a, Vector2 b)
+{
+    return sqrtf(distance2(a, b));
+}
+
+Vector2 norm(Vector2 a)
+{
+    float len = length(a);
+    if (len != 0)
+        return {a.x/len, a.y/len};
+    else
+        return {0, 0};
+}
+
+Vector2 proj(Vector2 a, Vector2 b)
+{
+    float s = dot(a, b)/dot(b, b);
+    return {b.x*s, b.y*s};
+}
+
+std::ostream& operator<< (std::ostream& os, const Vector2& v)
+{
+    os << std::fixed << std::setprecision(2) << "{.x=" << v.x << ", .y=" << v.y << "}";
+    return os;
+}
 
 std::string to_string(const Vector2& v)
 {
-    return "{ .x=" + std::to_string(v.x) + ", .y=" + std::to_string(v.y) + " }";
+    std::stringstream ss;
+    ss << v;
+    return ss.str();
 }
-
-struct Atom
-{
-    Vector2 pos;
-    Vector2 vel;
-    Vector2 acc;
-    float t = 0;
-};
-
-std::string to_string(const Atom& a)
-{
-    return "{ .pos=" + to_string(a.pos)
-        + ", .vel=" + to_string(a.vel)
-        + ", .acc=" + to_string(a.acc)
-        + ", .t=" + std::to_string(a.t) + " }";
-}
-
-
-int sign(float x)
-{
-	return x >= 0 ? 1 : -1;
-}
-
-Vector2 t_to_vel(float t, Vector2 vel)
-{
-    float x2 = vel.x*vel.x;
-    float y2 = vel.y*vel.y;
-    float s = x2 + y2;
-    float qx = s > 0 ? x2 / s : 0;
-    float qy = s > 0 ? y2 / s : 0;
-    return { sign(vel.x) * sqrt(t*KM*qx),
-             sign(vel.y) * sqrt(t*KM*qy) };
-}
-
-
-float vel_to_t(Vector2 vel)
-{
-    return (vel.x*vel.x + vel.y*vel.y)/KM;
-}
-
-
-float model_width = boiler_width*MODEL_SCALE;
-float model_height = boiler_height*MODEL_SCALE;
-
-float model_radius = gradient_radius*MODEL_SCALE;
 
 
 ////////////////////////////////////////////////////////////////////////////////
+
+
+std::random_device rand_dev;
+std::default_random_engine dre1(rand_dev());
+
+float randrange(float from, float to)
+{
+    std::uniform_real_distribution<float> uniform_dist(from, to);
+    return uniform_dist(dre1);
+}
+
+float fit_to_range(float value, std::pair<float, float> range)
+{
+    if (value < range.first) {
+        return range.first;
+    } else if (value > range.second) {
+        return range.second;
+    } else {
+        return value;
+    }
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+
+struct Atom
+{
+    static constexpr float KM = 200;
+
+    float r;
+
+    Vector2 pos;
+    Vector2 vel;
+    Vector2 acc = {0, 0};
+
+    void set_T(float T)
+    {
+        vel = norm(vel) * sqrtf(T*KM);
+    }
+
+    float get_T() const
+    {
+        return length2(vel)/KM;
+    }
+
+    void update_step(Vector2 global_acc, float dt)
+    {
+        Vector2 a = acc + global_acc;
+        vel += a*dt;
+        pos += vel*dt;
+    }
+};
+
+std::ostream& operator<< (std::ostream& os, const Atom& a)
+{
+    os << "{.r=" << a.r
+        << ", .pos=" << a.pos
+        << ", .vel=" << a.vel
+        << ", .T=" << a.get_T()
+        << "}";
+    return os;
+}
+
+std::string to_string(const Atom& a)
+{
+    std::stringstream ss;
+    ss << a;
+    return ss.str();
+}
+
+//TODO: different impact models
+
+void impact(Atom& atom1, Atom& atom2)
+{
+    float d2 = distance2(atom1.pos, atom2.pos);
+    float max_distance = atom1.r + atom2.r;
+    if (d2 > max_distance*max_distance) {
+        return;
+    }
+
+    // vector from center of atom1 to center of atom2 goes through impact place
+    Vector2 s12 = atom2.pos - atom1.pos;
+    Vector2 s21 = invert(s12);
+
+    // normal vectors to impact line - atoms will exchange velocity projections on this vector
+    Vector2 n12 = norm(s12);
+    Vector2 n21 = invert(n12);
+
+    // velocity of atom1 in projection on vector from atom1 to atom2 - then goes to atom2
+    Vector2 v1n12 = proj(atom1.vel, s12);
+    // velocity of atom2 in projection on vector from atom2 to atom1 - then goes to atom1
+    Vector2 v2n21 = proj(atom2.vel, s21);
+    // left velocity - saved
+    Vector2 v1p = atom1.vel - v1n12;
+    Vector2 v2p = atom2.vel - v2n21;
+
+    // exchange impulse
+    atom1.vel = v1p + v2n21;
+    atom2.vel = v2p + v1n12;
+
+    float d = sqrt(d2);
+    float r = max_distance/2 - d/2;
+    r += 1.0;
+
+    atom1.pos += n21 * r;
+    atom2.pos += n12 * r;
+}
+
+//TODO: grid class, expandable, nailed to model coordinates
 
 using grid_t = std::vector<std::vector<std::vector<Atom*>>>;
 
@@ -167,18 +300,17 @@ grid_t new_grid(size_t w, size_t h)
     return g;
 }
 
-auto grid = new_grid(grid_width, grid_height);
-
 void print_grid(const grid_t& g)
 {
+    printf("Grid width=%lu, height=%lu:\n", g.empty() ? 0 : g[0].size(), g.size());
     size_t iy = 0;
     for (const auto& row : g) {
         size_t ix = 0;
         for (const auto& cell : row) {
             if (cell.size() > 0) {
-                printf("Cell %lu %lu:\n", iy, ix);
+                printf("    Cell %lu %lu:\n", iy, ix);
                 for (const Atom* atom : cell) {
-                    printf("    %p: %s\n", atom, to_string(*atom).c_str());
+                    printf("        %p: %s\n", atom, to_string(*atom).c_str());
                 }
             }
             ix++;
@@ -187,410 +319,393 @@ void print_grid(const grid_t& g)
     }
 }
 
-void index_atom(grid_t& g, Atom& atom)
+struct MyModel
 {
-    size_t ix = size_t(atom.pos.x / MODEL_SCALE / (2*gradient_radius*spacing));
-    size_t iy = size_t(atom.pos.y / MODEL_SCALE / (2*gradient_radius*spacing));
-    g[iy][ix].push_back(&atom);
-}
+    float time_scale = 10.0;
 
-std::vector<Atom> atoms;
+    static constexpr float T_MAX = 1000;
+    static constexpr float T_MIN = 273.15;
 
-void print_atoms()
-{
-    for (const auto& atom : atoms) {
-        printf("%p: %s\n", &atom, to_string(atom).c_str());
+    float R_atom = 1000;
+
+    Vector2 g_acc = {0, -9.81 / 5};
+
+    std::vector<Atom> atoms;
+
+    float width = 400 * R_atom;
+    float height = 400 * R_atom;
+
+    grid_t grid;
+
+    size_t grid_row_size = 100;
+    size_t grid_col_size = 100;
+
+    float grid_cell_width() const
+    {
+        return width / grid_row_size;
     }
-}
 
-Atom& create_atom(Vector2 pos, Vector2 v, Vector2 a)
-{
-    atoms.emplace_back(Atom{pos, v, a, vel_to_t(v)});
-    return atoms.back();
-}
+    float grid_cell_height() const
+    {
+        return height / grid_col_size;
+    }
 
-Atom& create_test_atom(float ix, float iy, float dx, float dy)
-{
-    float x = ix*2*gradient_radius*spacing + gradient_radius*spacing;
-    float y = iy*2*gradient_radius*spacing + gradient_radius*spacing;
-    x *= MODEL_SCALE;
-    y *= MODEL_SCALE;
-    return create_atom({x, y}, {dx, dy}, {0, 0});
-}
+    float max_atoms_in_cell() const
+    {
+        return grid_cell_height() * grid_cell_height() / (4*R_atom*R_atom);
+    }
 
-void setup_debug_mode()
-{
-    // g_acc = 0
-    show_density = true;
-    max_fps = 120;
+    Atom& create_atom(Vector2 pos, Vector2 v)
+    {
+        Atom atom{R_atom, pos, v};
 
-    atoms.reserve(4);
+        atoms.push_back(atom);
+        Atom& a = atoms.back();
 
-    index_atom(grid, create_test_atom(1.5, 0.5, -100, 100));
-    index_atom(grid, create_test_atom(4, 2.5, 100, -100));
-    //print_atoms();
-    //print_grid(grid);
-}
+        index_atom(grid, &a);
 
-std::random_device rand_dev;
-std::default_random_engine dre1(rand_dev());
+        return a;
+    }
 
-int randrange(int from, int to)
-{
-    std::uniform_int_distribution<int> uniform_dist(from, to);
-    return uniform_dist(dre1);
-}
+    void index_atom(grid_t& g, Atom* atom)
+    {
+        size_t ix = atom->pos.x / grid_cell_width();
+        size_t iy = atom->pos.y / grid_cell_height();
+        g[iy][ix].push_back(atom);
+    }
 
-void setup()
-{
-    atoms.reserve(grid_width*grid_height);
+    void print_atoms()
+    {
+        printf("atoms (count=%lu):\n", atoms.size());
+        for (const auto& atom : atoms) {
+            printf("    %p: %s\n", &atom, to_string(atom).c_str());
+        }
+    }
 
-    size_t iy = 0;
-    for (auto& row : grid) {
-        size_t ix = 0;
-        for (auto& cell : row) {
-            float x = ix*2*gradient_radius*spacing + gradient_radius*spacing;
-            float y = iy*2*gradient_radius*spacing + gradient_radius*spacing;
-            x *= MODEL_SCALE;
-            y *= MODEL_SCALE;
+    Atom& create_test_atom(float ix, float iy, float dx, float dy)
+    {
+        float x = (ix + 0.5)*R_atom*2;
+        float y = (iy + 0.5)*R_atom*2;
+        x = fit_to_range(x, {R_atom, width - R_atom});
+        y = fit_to_range(y, {R_atom, height - R_atom});
+        return create_atom({x, y}, {dx, dy});
+    }
 
-            float t = randrange(int(T_MIN), int(T_MAX));
+    void setup_debug()
+    {
+        time_scale = 20;
+
+        width = R_atom * 16;
+        height = R_atom * 16;
+
+        grid_row_size = 5;
+        grid_col_size = 5;
+
+        grid = new_grid(grid_row_size, grid_col_size);
+
+        g_acc = {0, 0};
+
+        atoms.reserve(16);
+
+        create_test_atom(0, 2, 500, 0);
+        create_test_atom(2, 2, 0, 0);
+        create_test_atom(3, 2, 0, 0);
+        create_test_atom(2, 6, 0, -20);
+
+        print_atoms();
+        print_grid(grid);
+    }
+
+    void setup_random(size_t count)
+    {
+        grid = new_grid(grid_row_size, grid_col_size);
+
+        atoms.reserve(count);
+
+        for (size_t i = 0; i < count; i++) {
+            float x = randrange(R_atom, width - R_atom);
+            float y = randrange(R_atom, height - R_atom);
             float qx = randrange(-10, 10);
             float qy = randrange(-10, 10);
-
-            Atom& atom = create_atom({x, y}, t_to_vel(t, {qx, qy}), {0, -g_acc});
-
-            cell.push_back(&atom);
-
-            ix++;
+            float t = randrange(0.0, T_MIN);
+            create_atom({x, y}, {qx, qy}).set_T(t);
         }
-        iy++;
-    }
-}
-
-
-////////////////////////////////////////////////////////////////////////////////
-
-
-Vector2 model_pos_to_graphics(Vector2 p)
-{
-    float x = p.x/MODEL_SCALE - window_width/2 - gradient_radius;
-    float y = -p.y/MODEL_SCALE + window_height/2 - gradient_radius;
-    return {x, y};
-}
-
-uint8_t temperature_to_sprite_index(float t)
-{
-    float T = T_MAX - T_MIN;
-    float t_min = T_MIN - T;
-    float t_max = T_MAX + T;
-    if (t < t_min) {
-        t = t_min;
-    }
-    if (t > t_max) {
-        t = t_max;
     }
 
-    int c = (t-t_min)/(t_max-t_min)*255;
+    void update(float dt_seconds)
+    {
+        float dt = dt_seconds * time_scale;
 
-    if (c < 0) {
-        return 0;
-    }
-    if (c > 255) {
-        return 255;
-    }
+        //TODO: max speed not exceed 1/2*R_atom
 
-    return uint8_t(c);
-}
+        grid_t result_grid = new_grid(grid_row_size, grid_col_size);
 
+        int iy = 0;
+        for (const auto& row : grid) {
+            int ix = 0;
+            for (const auto& cell : row) {
+                for (Atom* atom : cell) {
 
-////////////////////////////////////////////////////////////////////////////////
-
-
-float margin_h = (window_width - boiler_width)/2;
-float margin_v = (window_height - boiler_height)/2;
-
-Color gradient_inner_color(uint8_t i)
-{
-    return {uint8_t(i), 0, uint8_t(255-i), gradient_center_opacity};
-}
-
-Color gradient_outer_color(uint8_t i)
-{
-    return {uint8_t(i), 0, uint8_t(255-i), gradient_edge_opacity};
-}
-
-std::vector<Texture2D> atom_colors;
-
-std::vector<Texture2D> generate_gradients()
-{
-    std::vector<Texture2D> textures;
-    for (size_t i = 0; i < 256; i++) {
-        Image radial_gradient = GenImageGradientRadial(gradient_radius * 2,
-                                                       gradient_radius * 2,
-                                                       0.0f,
-                                                       gradient_inner_color(i),
-                                                       gradient_outer_color(i));
-        textures.push_back(LoadTextureFromImage(radial_gradient));
-        UnloadImage(radial_gradient);
-    }
-    return textures;
-}
-
-
-////////////////////////////////////////////////////////////////////////////////
-
-
-float distance2(Vector2 a, Vector2 b)
-{
-    return (a.x-b.x)*(a.x-b.x) + (a.y-b.y)*(a.y-b.y);
-}
-
-float dot(Vector2 a, Vector2 b)
-{
-    return a.x*b.x + a.y*b.y;
-}
-
-Vector2 norm(Vector2 a)
-{
-    float s = sqrt(dot(a, a));
-    if (s != 0)
-        return {a.x/s, a.y/s};
-    else
-        return {0, 0};
-}
-
-Vector2 proj(Vector2 a, Vector2 b)
-{
-    float s = dot(a, b)/dot(b, b);
-    return {b.x*s, b.y*s};
-}
-
-Vector2 vsum(Vector2 a, Vector2 b)
-{
-    return {a.x + b.x, a.y + b.y};
-}
-
-Vector2 vdif(Vector2 a, Vector2 b)
-{
-    return {a.x - b.x, a.y - b.y};
-}
-
-Vector2 vmul(Vector2 a, float k)
-{
-    return {a.x*k, a.y*k};
-}
-
-Vector2 invert(Vector2 a)
-{
-    return {-a.x, -a.y};
-}
-
-Vector2 orto(Vector2 a)
-{
-    return {-a.y, a.x};
-}
-
-
-////////////////////////////////////////////////////////////////////////////////
-
-float model_d2 = 4*model_radius*model_radius;
-
-
-void impact(Atom& atom1, Atom& atom2, float dt)
-{
-    float d2 = distance2(atom1.pos, atom2.pos);
-    if (d2 > model_d2) {
-        return;
-    }
-
-    // print("before:", atom1.vel.x, atom1.vel.y, atom2.vel.x, atom2.vel.y)
-    // print("before:", atom1.acc.x, atom1.acc.y, atom2.acc.x, atom2.acc.y)
-
-    // vector from center of atom1 to center of atom2 goes through impact place
-    Vector2 s12 = vdif(atom2.pos, atom1.pos);
-    Vector2 s21 = invert(s12);
-
-    // print(s12.x, s12.y)
-
-    // normal vectors to impact line - atoms will exchange velocity projections on this vector
-    Vector2 n12 = norm(s12);
-    Vector2 n21 = invert(n12);
-
-    // print(n12.x, n12.y, n21.x, n21.y)
-
-    // velocity of atom1 in projection on vector from atom1 to atom2 - then goes to atom2
-    Vector2 v1n12 = proj(atom1.vel, s12);
-    // velocity of atom2 in projection on vector from atom2 to atom1 - then goes to atom1
-    Vector2 v2n21 = proj(atom2.vel, s21);
-    // left velocity - saved
-    Vector2 v1p = vdif(atom1.vel, v1n12);
-    Vector2 v2p = vdif(atom2.vel, v2n21);
-
-    // exchange impulse
-    atom1.vel = vsum(v1p, v2n21);
-    atom2.vel = vsum(v2p, v1n12);
-
-    float d = sqrt(d2);
-    float r = model_radius - d/2;
-    r += 1.0;
-
-    atom1.pos = vsum(atom1.pos, vmul(n21, r));
-    atom2.pos = vsum(atom2.pos, vmul(n12, r));
-
-    // print("after:", atom1.vel.x, atom1.vel.y, atom2.vel.x, atom2.vel.y)
-    // print("after:", atom1.acc.x, atom1.acc.y, atom2.acc.x, atom2.acc.y)
-}
-
-
-grid_t update_model(const grid_t& g, float dt)
-{
-    grid_t result_grid = new_grid(grid_width, grid_height);
-
-    int iy = 0;
-    for (const auto& row : g) {
-        int ix = 0;
-        for (const auto& cell : row) {
-            for (Atom* atom : cell) {
-
-                for (int pix = ix-1; pix < ix+1; pix++) {
-                    for (int piy = iy-1; piy < iy+1; piy++) {
-                        if (pix >= 0 && piy >= 0 && pix < int(row.size()) && piy < int(grid.size())) {
-                            for (Atom* a : grid[piy][pix]) {
-                                if (a != atom) {
-                                    impact(*atom, *a, dt);
+                    for (int pix = ix-1; pix < ix+1; pix++) {
+                        for (int piy = iy-1; piy < iy+1; piy++) {
+                            if (pix >= 0 && piy >= 0 && pix < int(row.size()) && piy < int(grid.size())) {
+                                for (Atom* a : grid[piy][pix]) {
+                                    if (a != atom) {
+                                        impact(*atom, *a);
+                                    }
                                 }
                             }
                         }
                     }
-                }
 
-                atom->vel.x += atom->acc.x*dt;
-                atom->vel.y += atom->acc.y*dt;
-                atom->t = vel_to_t(atom->vel);
+                    atom->update_step(g_acc, dt);
 
-                atom->pos.x += atom->vel.x*dt;
-                atom->pos.y += atom->vel.y*dt;
+                    // borders
+                    if (atom->pos.x < atom->r && atom->vel.x < 0) {
+                        atom->pos.x = atom->r;
+                        atom->vel.x = -atom->vel.x;
+                    }
+                    if (atom->pos.x > width - atom->r && atom->vel.x > 0) {
+                        atom->pos.x = width - atom->r;
+                        atom->vel.x = -atom->vel.x;
+                    }
+                    if (atom->pos.y < atom->r && atom->vel.y < 0) {
+                        atom->pos.y = atom->r;
+                        atom->vel.y = -atom->vel.y;
+                        atom->set_T(T_MAX);
+                    }
+                    if (atom->pos.y > height - atom->r && atom->vel.y > 0) {
+                        atom->pos.y = height - atom->r;
+                        atom->vel.y = -atom->vel.y;
+                        atom->set_T(T_MIN);
+                    }
 
-                // borders
-                if (atom->pos.x < model_radius) {
-                    atom->pos.x = model_radius+1;
-                    atom->vel.x = -atom->vel.x;
+                    index_atom(result_grid, atom);
                 }
-                if (atom->pos.x > model_width-model_radius) {
-                    atom->pos.x = model_width-model_radius-1;
-                    atom->vel.x = -atom->vel.x;
-                }
-
-                if (atom->pos.y < model_radius) {
-                    atom->pos.y = model_radius+1;
-                    atom->vel.y = -atom->vel.y;
-                    atom->t = T_MAX;
-                    atom->vel = t_to_vel(atom->t, atom->vel);
-                }
-                if (atom->pos.y > model_height-model_radius) {
-                    atom->pos.y = model_height-model_radius-1;
-                    atom->vel.y = -atom->vel.y;
-                    atom->t = T_MIN;
-                    atom->vel = t_to_vel(atom->t, atom->vel);
-                }
-
-                index_atom(result_grid, *atom);
+                ix++;
             }
-            ix++;
+            iy++;
         }
-        iy++;
+
+        grid = result_grid;
     }
 
-    return result_grid;
-}
+    struct GridCellDensity
+    {
+        Rectangle r;
+        float density;
+    };
 
+    std::vector<GridCellDensity> get_cells() const
+    {
+        std::vector<GridCellDensity> d;
+        d.reserve(grid_col_size * grid_row_size);
 
-void render(const grid_t& g)
-{
-    if (show_density) {
-        size_t max_atoms_in_cell=spacing*spacing*2;
+        size_t max_count = max_atoms_in_cell() + 1;
+        float cell_h = grid_cell_height();
+        float cell_w = grid_cell_width();
 
         int iy = 0;
-        for (const auto& row : g) {
+        for (const auto& row : grid) {
             int ix = 0;
             for (const auto& cell : row) {
 
-                int c = int(cell.size()*255/max_atoms_in_cell);
-                uint8_t u = c <= 255 ? 255-c : 0;
-                Color color = {u, u, u, 255};
-
-                float r_w = 2*gradient_radius*spacing;
-                float r_h = 2*gradient_radius*spacing;
-                Rectangle r{
-                    ix*r_w - window_width/2,
-                    iy*r_h - window_width/2,
-                    r_w,
-                    r_h
-                };
-                DrawRectangleRec(r, color);
+                d.push_back({
+                    {
+                        ix * cell_w,
+                        iy * cell_h,
+                        cell_w,
+                        cell_h
+                    },
+                    float(cell.size()) / max_count
+                });
 
                 ix++;
             }
             iy++;
         }
 
-    } else {
-        DrawRectangleRec({-window_width/2, -window_height/2, window_width, window_height}, LIGHTGRAY);
+        return d;
     }
 
-    for (const auto& atom : atoms) {
-        Texture2D& tx = atom_colors[temperature_to_sprite_index(atom.t)];
-        Vector2 pos = model_pos_to_graphics(atom.pos);
-        DrawTextureEx(tx, pos, 0, 1.0, WHITE);
+}; // MyModel
+
+
+
+struct MyRenderer
+{
+    float scale_factor = 0;
+
+    float gradient_radius = 0;
+    float gradient_scale = 1.0;
+
+    float window_width = 0;
+    float window_height = 0;
+
+    const uint8_t gradient_center_opacity = 100;
+    const uint8_t gradient_edge_opacity = 0;
+
+    bool show_density = false;
+    bool show_atoms = true;
+
+    void setup(const MyModel& m, float screen_width, float screen_height)
+    {
+        scale_factor = std::max(m.height / screen_height, m.width / screen_width);
+
+        gradient_radius = m.R_atom / scale_factor * gradient_scale;
+        window_width = m.width / scale_factor;
+        window_height = m.height / scale_factor;
     }
 
-    //str = "%.1f fps, %.2f/%.2f" % (last_fps, last_model_time, last_render_time)
-}
+    Vector2 atom_pos_to_screen(Vector2 p)
+    {
+        float x = p.x/scale_factor - window_width/2 - gradient_radius;
+        float y = -p.y/scale_factor + window_height/2 - gradient_radius;
+        return {x, y};
+    }
+
+    uint8_t temperature_to_sprite_index(float t)
+    {
+        float t_min = 0;
+        float t_max = MyModel::T_MAX * 2;
+
+        if (t < t_min) {
+            t = t_min;
+        }
+        if (t > t_max) {
+            t = t_max;
+        }
+
+        int c = (t-t_min)/(t_max-t_min)*255;
+
+        if (c < 0) {
+            return 0;
+        }
+        if (c > 255) {
+            return 255;
+        }
+
+        return uint8_t(c);
+    }
+
+    Color gradient_inner_color(uint8_t i)
+    {
+        return {uint8_t(i), 0, uint8_t(255-i), gradient_center_opacity};
+    }
+
+    Color gradient_outer_color(uint8_t i)
+    {
+        return {uint8_t(i), 0, uint8_t(255-i), gradient_edge_opacity};
+    }
+
+    std::vector<Texture2D> atom_colors;
+
+    void prepare()
+    {
+        for (size_t i = 0; i < 256; i++) {
+            Image radial_gradient = GenImageGradientRadial(gradient_radius * 2,
+                                                        gradient_radius * 2,
+                                                        0.0f,
+                                                        gradient_inner_color(i),
+                                                        gradient_outer_color(i));
+            atom_colors.push_back(LoadTextureFromImage(radial_gradient));
+            UnloadImage(radial_gradient);
+        }
+    }
+
+    Rectangle from_model(Rectangle r)
+    {
+        return {
+            r.x / scale_factor - window_width/2,
+            -r.y / scale_factor + window_height/2 - r.height/scale_factor,
+            r.width / scale_factor,
+            r.height / scale_factor
+        };
+    }
+    Color cell_color(float density)
+    {
+        int c = 40 + int(80 * density);
+        uint8_t u = c <= 255 ? 255-c : 0;
+        return {u, u, u, 255};
+    }
+
+    void render(const MyModel& m)
+    {
+        if (show_density) {
+            auto cells = m.get_cells();
+
+            for (const auto& cell : cells) {
+                Color c = cell_color(cell.density);
+                auto r = from_model(cell.r);
+
+                DrawRectangleRec(r, c);
+            }
+        } else {
+            DrawRectangleRec({-window_width/2, -window_height/2, window_width, window_height}, LIGHTGRAY);
+        }
+
+        if (show_atoms) {
+            for (const auto& atom : m.atoms) {
+                float t = atom.get_T();
+                uint8_t color_index = temperature_to_sprite_index(t);
+                Texture2D& tx = atom_colors[color_index];
+                Vector2 pos = atom_pos_to_screen(atom.pos);
+                DrawTextureEx(tx, pos, 0, 1.0, WHITE);
+            }
+        }
+    }
+
+}; // MyRenderer
 
 
-////////////////////////////////////////////////////////////////////////////////
+
+using Clock = std::chrono::steady_clock;
 
 
 int main(void)
 {
-    if (debug_mode) {
-        setup_debug_mode();
-    } else {
-        setup();
-    }
+    MyModel model;
 
-    const int screenWidth = window_width;
-    const int screenHeight = window_height;
+    //model.setup_debug();
+    model.setup_random(10000);
 
-    InitWindow(screenWidth, screenHeight, "2D atomic gas");
+    MyRenderer r;
+    r.show_density = false;
+    r.show_atoms = true;
+    r.gradient_scale = 4.0;
 
-    float border_thickness = 10;
-    auto blocks = Box({-300, -150}, 600, 300, GRAY, border_thickness);
 
-    // Draw 256 gradients before start
-    atom_colors = generate_gradients();
+    int screen_width = 800;
+    int screen_height = 600;
+    int max_fps = 120;
+
+    InitWindow(screen_width, screen_height, "2D atomic gas");
+
+    r.setup(model, screen_width, screen_height);
+    r.prepare();
 
     Camera2D camera = { {0} };
     camera.target = {0, 0};
-    camera.offset = (Vector2){ screenWidth / 2.0f, screenHeight / 2.0f };
+    camera.offset = (Vector2){ screen_width / 2.0f, screen_height / 2.0f };
     camera.rotation = 0.0f;
     camera.zoom = 1.0f;
 
     SetTargetFPS(max_fps);
 
-    while (!WindowShouldClose()) {
+    Clock::time_point last_ts = Clock::now();
 
-        grid = update_model(grid, DT);
+    while (!WindowShouldClose()) {
+        Clock::time_point now = Clock::now();
+        std::chrono::duration<float> dt = now - last_ts;
+        last_ts = now;
+
+        model.update(dt.count());
 
         BeginDrawing();
-        ClearBackground(GREEN);
+        ClearBackground(BLACK);
         BeginMode2D(camera);
 
-        //for (const auto& block : blocks)
-        //    DrawRectangleRec(block.rect, block.color);
-
-        render(grid);
+        r.render(model);
 
         EndMode2D();
         DrawFPS(20, 5);

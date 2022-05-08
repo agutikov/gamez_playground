@@ -1,4 +1,6 @@
-project('gamez-playground', 'c', 'cpp')
+project('gamez-playground', 'c', 'cpp',
+  default_options: ['c_std=c11', 'cpp_std=c++20']
+)
 
 # From https://github.com/gilzoide/raylib-meson-template
 
