@@ -150,9 +150,12 @@ struct MyModel
     float height = 400 * R_atom;
 
     grid_t grid;
+    std::vector<std::vector<Rectangle>> grid_cells;
 
     size_t grid_row_size = 100;
     size_t grid_col_size = 100;
+
+    float max_atoms_in_cell;
 
     float grid_cell_width() const
     {
@@ -164,9 +167,9 @@ struct MyModel
         return height / grid_col_size;
     }
 
-    float max_atoms_in_cell() const
+    float grid_cell_density(size_t x, size_t y) const
     {
-        return grid_cell_height() * grid_cell_height() / (4*R_atom*R_atom);
+        return grid[y][x].size() / max_atoms_in_cell;
     }
 
     Atom& create_atom(Vector2 pos, Vector2 v)
@@ -205,6 +208,13 @@ struct MyModel
         return create_atom({x, y}, {dx, dy});
     }
 
+    void _setup()
+    {
+        grid = new_grid(grid_row_size, grid_col_size);
+        setup_grid_cells();
+        max_atoms_in_cell = grid_cell_height() * grid_cell_height() / (4*R_atom*R_atom);
+    }
+
     void setup_debug()
     {
         time_scale = 20;
@@ -215,9 +225,9 @@ struct MyModel
         grid_row_size = 5;
         grid_col_size = 5;
 
-        grid = new_grid(grid_row_size, grid_col_size);
-
         g_acc = {0, 0};
+
+        _setup();
 
         atoms.reserve(16);
 
@@ -232,7 +242,7 @@ struct MyModel
 
     void setup_random(size_t count)
     {
-        grid = new_grid(grid_row_size, grid_col_size);
+        _setup();
 
         atoms.reserve(count);
 
@@ -304,42 +314,22 @@ struct MyModel
         grid = result_grid;
     }
 
-    struct GridCellDensity
+    void setup_grid_cells()
     {
-        Rectangle r;
-        float density;
-    };
-
-    std::vector<GridCellDensity> get_cells() const
-    {
-        std::vector<GridCellDensity> d;
-        d.reserve(grid_col_size * grid_row_size);
-
-        size_t max_count = max_atoms_in_cell() + 1;
         float cell_h = grid_cell_height();
         float cell_w = grid_cell_width();
 
-        int iy = 0;
-        for (const auto& row : grid) {
-            int ix = 0;
-            for (const auto& cell : row) {
-
-                d.push_back({
-                    {
-                        ix * cell_w,
-                        iy * cell_h,
-                        cell_w,
-                        cell_h
-                    },
-                    float(cell.size()) / max_count
+        for (size_t y = 0; y < grid_col_size; y++) {
+            grid_cells.push_back({});
+            for (size_t x = 0; x < grid_row_size; x++) {
+                grid_cells.back().push_back({
+                    x * cell_w,
+                    y * cell_h,
+                    cell_w,
+                    cell_h
                 });
-
-                ix++;
             }
-            iy++;
         }
-
-        return d;
     }
 
 }; // MyModel
@@ -359,8 +349,12 @@ struct MyRenderer
     const uint8_t gradient_center_opacity = 100;
     const uint8_t gradient_edge_opacity = 0;
 
-    bool show_density = false;
-    bool show_atoms = true;
+    bool draw_density_map = false;
+    bool draw_atoms = true;
+
+    std::vector<Texture2D> atom_colors;
+
+    std::vector<std::vector<Rectangle>> grid_cells;
 
     void setup(const MyModel& m, float screen_width, float screen_height)
     {
@@ -369,6 +363,8 @@ struct MyRenderer
         gradient_radius = m.R_atom / scale_factor * gradient_scale;
         window_width = m.width / scale_factor;
         window_height = m.height / scale_factor;
+
+        setup_grid_cells(m);
     }
 
     Vector2 atom_pos_to_screen(Vector2 p)
@@ -412,8 +408,6 @@ struct MyRenderer
         return {uint8_t(i), 0, uint8_t(255-i), gradient_edge_opacity};
     }
 
-    std::vector<Texture2D> atom_colors;
-
     void prepare()
     {
         for (size_t i = 0; i < 256; i++) {
@@ -427,7 +421,7 @@ struct MyRenderer
         }
     }
 
-    Rectangle from_model(Rectangle r)
+    Rectangle to_screen(Rectangle r)
     {
         return {
             r.x / scale_factor - window_width/2,
@@ -436,6 +430,17 @@ struct MyRenderer
             r.height / scale_factor
         };
     }
+
+    void setup_grid_cells(const MyModel& m)
+    {
+        for (size_t y = 0; y < m.grid_col_size; y++) {
+            grid_cells.push_back({});
+            for (size_t x = 0; x < m.grid_row_size; x++) {
+                grid_cells.back().push_back(to_screen(m.grid_cells[y][x]));
+            }
+        }
+    }
+
     Color cell_color(float density)
     {
         int c = 40 + int(80 * density);
@@ -445,20 +450,18 @@ struct MyRenderer
 
     void render(const MyModel& m)
     {
-        if (show_density) {
-            auto cells = m.get_cells();
-
-            for (const auto& cell : cells) {
-                Color c = cell_color(cell.density);
-                auto r = from_model(cell.r);
-
-                DrawRectangleRec(r, c);
+        if (draw_density_map) {
+            for (size_t y = 0; y < m.grid_col_size; y++) {
+                for (size_t x = 0; x < m.grid_row_size; x++) {
+                    Color c = cell_color(m.grid_cell_density(x, y));
+                    DrawRectangleRec(grid_cells[y][x], c);
+                }
             }
         } else {
             DrawRectangleRec({-window_width/2, -window_height/2, window_width, window_height}, LIGHTGRAY);
         }
 
-        if (show_atoms) {
+        if (draw_atoms) {
             for (const auto& atom : m.atoms) {
                 float t = atom.get_T();
                 uint8_t color_index = temperature_to_sprite_index(t);
@@ -483,8 +486,8 @@ int main(void)
     model.setup_random(10000);
 
     MyRenderer r;
-    r.show_density = false;
-    r.show_atoms = true;
+    r.draw_density_map = true;
+    r.draw_atoms = false;
     r.gradient_scale = 4.0;
 
 
