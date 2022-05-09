@@ -9,15 +9,19 @@
 #include <chrono>
 #include "lib/vector.h"
 #include "lib/random.h"
+#include <limits>
+#include <fmt/core.h>
+#include <exception>
 
 
+using namespace std::chrono_literals;
 
 using Clock = std::chrono::steady_clock;
 
 
 struct Atom
 {
-    static constexpr float KM = 200;
+    static constexpr float K = 30000;
 
     float r;
 
@@ -25,14 +29,16 @@ struct Atom
     Vector2 vel;
     Vector2 acc = {0, 0};
 
+    const float m = 1.0;
+
     void set_T(float T)
     {
-        vel = norm(vel) * sqrtf(T*KM);
+        vel = norm(vel) * sqrtf(T*K*m);
     }
 
     float get_T() const
     {
-        return length2(vel)/KM;
+        return length2(vel)/(K*m);
     }
 
     void update_step(Vector2 global_acc, float dt)
@@ -61,6 +67,8 @@ std::string to_string(const Atom& a)
 }
 
 //TODO: different impact models
+//TODO: mass
+//TODO: different R
 
 void impact(Atom& atom1, Atom& atom2)
 {
@@ -137,25 +145,46 @@ struct MyModel
 {
     float time_scale = 10.0;
 
-    static constexpr float T_MAX = 1000;
-    static constexpr float T_MIN = 273.15;
+    bool bottom_exchange_temperature = true;
+    bool top_exchange_temperature = true;
+    float T_top = 10;
+    float T_bottom = 500;
 
     float R_atom = 1000;
 
-    Vector2 g_acc = {0, -9.81 / 5};
+    Vector2 g_acc = {0, -9.81};
 
     std::vector<Atom> atoms;
 
-    float width = 400 * R_atom;
-    float height = 400 * R_atom;
+    float width = 100 * R_atom;
+    float height = 100 * R_atom;
 
     grid_t grid;
     std::vector<std::vector<Rectangle>> grid_cells;
 
-    size_t grid_row_size = 100;
-    size_t grid_col_size = 100;
+    size_t grid_row_size = 20;
+    size_t grid_col_size = 20;
 
     float max_atoms_in_cell;
+
+    stat_value<float>speed_max_values;
+    stat_value<float>speed_mean_values;
+    stat_value<float>speed_min_values;
+
+    decltype(speed_max_values)::stats_t speed_max = {};
+    decltype(speed_mean_values)::stats_t speed_mean = {};
+    decltype(speed_min_values)::stats_t speed_min = {};
+
+    float last_T_max = 0;
+    float last_speed_max = 0;
+    float last_R_min = 0;
+
+    Clock::time_point stats_timestamp = Clock::now();
+    std::chrono::milliseconds stats_period = 2s;
+
+    size_t max_atoms_count = 10000;
+    float new_atoms_per_second = 0;
+    float accumulated_time = 0;
 
     float grid_cell_width() const
     {
@@ -174,6 +203,10 @@ struct MyModel
 
     Atom& create_atom(Vector2 pos, Vector2 v)
     {
+        if (atoms.size() >= max_atoms_count) {
+            throw std::runtime_error("Exceeds max number of atoms");
+        }
+
         Atom atom{R_atom, pos, v};
 
         atoms.push_back(atom);
@@ -208,8 +241,10 @@ struct MyModel
         return create_atom({x, y}, {dx, dy});
     }
 
-    void _setup()
+    void basic_setup()
     {
+        atoms.reserve(max_atoms_count);
+
         grid = new_grid(grid_row_size, grid_col_size);
         setup_grid_cells();
         max_atoms_in_cell = grid_cell_height() * grid_cell_height() / (4*R_atom*R_atom);
@@ -227,9 +262,7 @@ struct MyModel
 
         g_acc = {0, 0};
 
-        _setup();
-
-        atoms.reserve(16);
+        basic_setup();
 
         create_test_atom(0, 2, 500, 0);
         create_test_atom(2, 2, 0, 0);
@@ -240,27 +273,73 @@ struct MyModel
         print_grid(grid);
     }
 
-    void setup_random(size_t count)
+    void generate_random(size_t count)
     {
-        _setup();
-
-        atoms.reserve(count);
-
         for (size_t i = 0; i < count; i++) {
             float x = randrange(R_atom, width - R_atom);
             float y = randrange(R_atom, height - R_atom);
             float qx = randrange(-10, 10);
             float qy = randrange(-10, 10);
-            float t = randrange(0.0, T_MIN);
+            float t = randrange(0.0, T_top);
             create_atom({x, y}, {qx, qy}).set_T(t);
+        }
+    }
+
+    void update_stats()
+    {
+        auto t = Clock::now();
+        if (t < stats_timestamp + stats_period) {
+            return;
+        }
+        stats_timestamp = t;
+
+        speed_max = speed_max_values.produce();
+        speed_min = speed_min_values.produce();
+        speed_mean = speed_mean_values.produce();
+    }
+
+    void update_new_atoms(float dt_seconds)
+    {
+        if (atoms.size() >= max_atoms_count) {
+            return;
+        }
+        if (new_atoms_per_second <= 0) {
+            return;
+        }
+        accumulated_time += dt_seconds;
+        size_t count = new_atoms_per_second * accumulated_time;
+        if (count <= 0) {
+            return;
+        }
+        accumulated_time -= count / new_atoms_per_second;
+
+        while (count--) {
+            create_atom({width - 2*R_atom, height - 10*R_atom}, {-4000, 0});
+        }
+    }
+
+    void update_time_scale(float dt_seconds)
+    {
+        float max_move = last_R_min / 2;
+        float dt = dt_seconds * time_scale;
+        float next_move = last_speed_max * dt;
+        if (next_move > max_move) {
+            // max_move == next_move = last_speed_max * dt_seconds * time_scale
+            time_scale = max_move / (last_speed_max * dt_seconds);
         }
     }
 
     void update(float dt_seconds)
     {
-        float dt = dt_seconds * time_scale;
+        update_new_atoms(dt_seconds);
 
-        //TODO: max speed not exceed 1/2*R_atom
+        stat_value<float>temperature;
+        stat_value<float>speed;
+        stat_value<float>radius; // in case if radius will be variable
+
+        // max speed must not exceed (min(R)/2)/dt, adjust time_scale instead
+        update_time_scale(dt_seconds);
+        float dt = dt_seconds * time_scale;
 
         grid_t result_grid = new_grid(grid_row_size, grid_col_size);
 
@@ -296,13 +375,21 @@ struct MyModel
                     if (atom->pos.y < atom->r && atom->vel.y < 0) {
                         atom->pos.y = atom->r;
                         atom->vel.y = -atom->vel.y;
-                        atom->set_T(T_MAX);
+                        if (bottom_exchange_temperature) {
+                            atom->set_T(T_bottom);
+                        }
                     }
                     if (atom->pos.y > height - atom->r && atom->vel.y > 0) {
                         atom->pos.y = height - atom->r;
                         atom->vel.y = -atom->vel.y;
-                        atom->set_T(T_MIN);
+                        if (top_exchange_temperature) {
+                            atom->set_T(T_top);
+                        }
                     }
+
+                    temperature.consume(atom->get_T());
+                    speed.consume(length(atom->vel));
+                    radius.consume(atom->r);
 
                     index_atom(result_grid, atom);
                 }
@@ -312,6 +399,18 @@ struct MyModel
         }
 
         grid = result_grid;
+
+        auto speed_stats = speed.produce();
+
+        last_T_max = temperature.produce().max;
+        last_speed_max = speed_stats.max;
+        last_R_min = radius.produce().min;
+
+        speed_min_values.consume(speed_stats.min / R_atom);
+        speed_mean_values.consume(speed_stats.mean / R_atom);
+        speed_max_values.consume(speed_stats.max / R_atom);
+
+        update_stats();
     }
 
     void setup_grid_cells()
@@ -345,6 +444,8 @@ struct MyRenderer
 
     float window_width = 0;
     float window_height = 0;
+    float x0 = 200;
+    float y0 = 0;
 
     const uint8_t gradient_center_opacity = 100;
     const uint8_t gradient_edge_opacity = 0;
@@ -354,48 +455,40 @@ struct MyRenderer
 
     std::vector<Texture2D> atom_colors;
 
+    Texture2D selected_atom;
+    Color selected_color = BLACK;
+
+    float margin = 10;
+
     std::vector<std::vector<Rectangle>> grid_cells;
+
+    Rectangle background;
 
     void setup(const MyModel& m, float screen_width, float screen_height)
     {
-        scale_factor = std::max(m.height / screen_height, m.width / screen_width);
+        scale_factor = std::max(
+            m.height / (screen_height - 2*margin),
+            m.width / (screen_width - margin - x0)
+        );
 
         gradient_radius = m.R_atom / scale_factor * gradient_scale;
         window_width = m.width / scale_factor;
         window_height = m.height / scale_factor;
 
+        //y0 += -window_height/2;
+        x0 += (window_width - screen_width)/2;
+
         setup_grid_cells(m);
+
+        background = {-window_width/2 + x0, -window_height/2 + y0,
+                        window_width, window_height};
     }
 
     Vector2 atom_pos_to_screen(Vector2 p)
     {
-        float x = p.x/scale_factor - window_width/2 - gradient_radius;
-        float y = -p.y/scale_factor + window_height/2 - gradient_radius;
+        float x = p.x/scale_factor - window_width/2 - gradient_radius + x0;
+        float y = -p.y/scale_factor + window_height/2 - gradient_radius + y0;
         return {x, y};
-    }
-
-    uint8_t temperature_to_sprite_index(float t)
-    {
-        float t_min = 0;
-        float t_max = MyModel::T_MAX * 2;
-
-        if (t < t_min) {
-            t = t_min;
-        }
-        if (t > t_max) {
-            t = t_max;
-        }
-
-        int c = (t-t_min)/(t_max-t_min)*255;
-
-        if (c < 0) {
-            return 0;
-        }
-        if (c > 255) {
-            return 255;
-        }
-
-        return uint8_t(c);
     }
 
     Color gradient_inner_color(uint8_t i)
@@ -408,24 +501,37 @@ struct MyRenderer
         return {uint8_t(i), 0, uint8_t(255-i), gradient_edge_opacity};
     }
 
+    Texture2D create_radial_gradient(Color inner, Color outer, float fat)
+    {
+        Image radial_gradient = GenImageGradientRadial(gradient_radius * 2,
+                                                    gradient_radius * 2,
+                                                    fat,
+                                                    inner,
+                                                    outer);
+        Texture2D txt = LoadTextureFromImage(radial_gradient);
+        UnloadImage(radial_gradient);
+        return txt;
+    }
+
     void prepare()
     {
         for (size_t i = 0; i < 256; i++) {
-            Image radial_gradient = GenImageGradientRadial(gradient_radius * 2,
-                                                        gradient_radius * 2,
-                                                        0.0f,
-                                                        gradient_inner_color(i),
-                                                        gradient_outer_color(i));
-            atom_colors.push_back(LoadTextureFromImage(radial_gradient));
-            UnloadImage(radial_gradient);
+            atom_colors.push_back(
+                create_radial_gradient(
+                    gradient_inner_color(i),
+                    gradient_outer_color(i),
+                    0.0f
+                )
+            );
         }
+        selected_atom = create_radial_gradient(selected_color, BLANK, 0.0f);
     }
 
     Rectangle to_screen(Rectangle r)
     {
         return {
-            r.x / scale_factor - window_width/2,
-            -r.y / scale_factor + window_height/2 - r.height/scale_factor,
+            r.x / scale_factor - window_width/2 + x0,
+            -r.y / scale_factor + window_height/2 - r.height/scale_factor + y0,
             r.width / scale_factor,
             r.height / scale_factor
         };
@@ -454,46 +560,75 @@ struct MyRenderer
             for (size_t y = 0; y < m.grid_col_size; y++) {
                 for (size_t x = 0; x < m.grid_row_size; x++) {
                     Color c = cell_color(m.grid_cell_density(x, y));
+
                     DrawRectangleRec(grid_cells[y][x], c);
                 }
             }
         } else {
-            DrawRectangleRec({-window_width/2, -window_height/2, window_width, window_height}, LIGHTGRAY);
+            DrawRectangleRec(background, LIGHTGRAY);
         }
 
         if (draw_atoms) {
-            for (const auto& atom : m.atoms) {
-                float t = atom.get_T();
-                uint8_t color_index = temperature_to_sprite_index(t);
-                Texture2D& tx = atom_colors[color_index];
+            for (auto it = m.atoms.begin() + 1; it < m.atoms.end(); ++it) {
+                const auto& atom = *it;
+
+                float t = atom.get_T() / m.last_T_max;
+                t = fit_to_range(t, {0.0, 1.0});
+                uint8_t color_index = t * 255;
+
+                const auto& tx = atom_colors[color_index];
                 Vector2 pos = atom_pos_to_screen(atom.pos);
+
                 DrawTextureEx(tx, pos, 0, 1.0, WHITE);
             }
+
+            Vector2 pos = atom_pos_to_screen(m.atoms[0].pos);
+            DrawTextureEx(selected_atom, pos, 0, 1.0, WHITE);
         }
+    }
+
+    void render_text(const MyModel& m)
+    {
+        DrawText(fmt::format("N={}", m.atoms.size()).c_str(), 5, 40, 12, GRAY);
+        DrawText(fmt::format("Time scale={:.3f}", m.time_scale).c_str(), 5, 60, 12, GRAY);
+        DrawText("Speed/R_atom:", 5, 80, 12, GRAY);
+        DrawText(("  min=" + std::string(m.speed_min)).c_str(), 5, 100, 12, GRAY);
+        DrawText(("  mean=" + std::string(m.speed_mean)).c_str(), 5, 120, 12, GRAY);
+        DrawText(("  max=" + std::string(m.speed_max)).c_str(), 5, 140, 12, GRAY);
     }
 
 }; // MyRenderer
 
 
+//TODO: mark one or several atom with color
+//TODO: record coordinates track of some atom
+//TODO: random generator
 
+//TODO: cmdline args
+
+//TODO: cylinder and tor surface
 
 
 int main(void)
 {
     MyModel model;
 
+    model.basic_setup();
+
     //model.setup_debug();
-    model.setup_random(10000);
+    model.generate_random(1000);
+    model.g_acc = {0, -9.81 * 10};
+    //model.new_atoms_per_second = 10;
+    //model.max_atoms_count = 10000;
 
     MyRenderer r;
-    r.draw_density_map = true;
-    r.draw_atoms = false;
-    r.gradient_scale = 4.0;
+    r.draw_density_map = false;
+    r.draw_atoms = true;
+    r.gradient_scale = 1.0;
 
-
-    int screen_width = 800;
-    int screen_height = 600;
-    int max_fps = 120;
+    int screen_width = 1200;
+    int screen_height = 700;
+    int max_fps = 60;
 
     InitWindow(screen_width, screen_height, "2D atomic gas");
 
@@ -518,13 +653,18 @@ int main(void)
         model.update(dt.count());
 
         BeginDrawing();
+
         ClearBackground(BLACK);
+
         BeginMode2D(camera);
 
         r.render(model);
 
         EndMode2D();
+
         DrawFPS(20, 5);
+        r.render_text(model);
+
         EndDrawing();
     }
 

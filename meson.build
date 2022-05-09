@@ -11,7 +11,7 @@ cxx = meson.get_compiler('cpp')
 
 c_args = []
 cpp_args = []
-link_args = []
+link_args = ['-lfmt']
 name_suffix = []
 dependencies = []
 
