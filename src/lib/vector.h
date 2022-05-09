@@ -6,7 +6,7 @@
 #include <iomanip>
 
 
-Vector2 invert(Vector2 a)
+Vector2 operator-(const Vector2& a)
 {
     return {-a.x, -a.y};
 }

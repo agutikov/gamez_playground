@@ -12,6 +12,8 @@
 #include <limits>
 #include <fmt/core.h>
 #include <exception>
+#include "lib/geom.h"
+#include <iostream>
 
 
 using namespace std::chrono_literals;
@@ -80,11 +82,11 @@ void impact(Atom& atom1, Atom& atom2)
 
     // vector from center of atom1 to center of atom2 goes through impact place
     Vector2 s12 = atom2.pos - atom1.pos;
-    Vector2 s21 = invert(s12);
+    Vector2 s21 = -s12;
 
     // normal vectors to impact line - atoms will exchange velocity projections on this vector
     Vector2 n12 = norm(s12);
-    Vector2 n21 = invert(n12);
+    Vector2 n21 = -n12;
 
     // velocity of atom1 in projection on vector from atom1 to atom2 - then goes to atom2
     Vector2 v1n12 = proj(atom1.vel, s12);
@@ -145,10 +147,10 @@ struct MyModel
 {
     float time_scale = 10.0;
 
-    bool bottom_exchange_temperature = true;
     bool top_exchange_temperature = true;
+    bool bottom_exchange_temperature = true;
     float T_top = 10;
-    float T_bottom = 500;
+    float T_bottom = 2000;
 
     float R_atom = 1000;
 
@@ -156,14 +158,15 @@ struct MyModel
 
     std::vector<Atom> atoms;
 
-    float width = 100 * R_atom;
-    float height = 100 * R_atom;
+    float width;
+    float height;
 
     grid_t grid;
     std::vector<std::vector<Rectangle>> grid_cells;
 
-    size_t grid_row_size = 20;
-    size_t grid_col_size = 20;
+    float grid_cell_R_count = 4.0;
+    size_t grid_row_size;
+    size_t grid_col_size;
 
     float max_atoms_in_cell;
 
@@ -183,7 +186,7 @@ struct MyModel
     std::chrono::milliseconds stats_period = 2s;
 
     size_t max_atoms_count = 10000;
-    float new_atoms_per_second = 0;
+    float new_atoms_rate = 0;
     float accumulated_time = 0;
 
     float grid_cell_width() const
@@ -239,6 +242,15 @@ struct MyModel
         x = fit_to_range(x, {R_atom, width - R_atom});
         y = fit_to_range(y, {R_atom, height - R_atom});
         return create_atom({x, y}, {dx, dy});
+    }
+
+    MyModel(Vector2 dimensions)
+    {
+        width = dimensions.x * R_atom;
+        height = dimensions.y * R_atom;
+
+        grid_row_size = width / (R_atom * grid_cell_R_count);
+        grid_col_size = height / (R_atom * grid_cell_R_count);
     }
 
     void basic_setup()
@@ -298,20 +310,20 @@ struct MyModel
         speed_mean = speed_mean_values.produce();
     }
 
-    void update_new_atoms(float dt_seconds)
+    void update_new_atoms(float dt)
     {
         if (atoms.size() >= max_atoms_count) {
             return;
         }
-        if (new_atoms_per_second <= 0) {
+        if (new_atoms_rate <= 0) {
             return;
         }
-        accumulated_time += dt_seconds;
-        size_t count = new_atoms_per_second * accumulated_time;
+        accumulated_time += dt;
+        size_t count = new_atoms_rate * accumulated_time;
         if (count <= 0) {
             return;
         }
-        accumulated_time -= count / new_atoms_per_second;
+        accumulated_time -= count / new_atoms_rate;
 
         while (count--) {
             create_atom({width - 2*R_atom, height - 10*R_atom}, {-4000, 0});
@@ -331,8 +343,6 @@ struct MyModel
 
     void update(float dt_seconds)
     {
-        update_new_atoms(dt_seconds);
-
         stat_value<float>temperature;
         stat_value<float>speed;
         stat_value<float>radius; // in case if radius will be variable
@@ -341,6 +351,8 @@ struct MyModel
         update_time_scale(dt_seconds);
         float dt = dt_seconds * time_scale;
 
+        update_new_atoms(dt);
+
         grid_t result_grid = new_grid(grid_row_size, grid_col_size);
 
         int iy = 0;
@@ -348,6 +360,8 @@ struct MyModel
             int ix = 0;
             for (const auto& cell : row) {
                 for (Atom* atom : cell) {
+
+                    //TODO: rewrite and optimize
 
                     for (int pix = ix-1; pix < ix+1; pix++) {
                         for (int piy = iy-1; piy < iy+1; piy++) {
@@ -444,8 +458,6 @@ struct MyRenderer
 
     float window_width = 0;
     float window_height = 0;
-    float x0 = 200;
-    float y0 = 0;
 
     const uint8_t gradient_center_opacity = 100;
     const uint8_t gradient_edge_opacity = 0;
@@ -466,28 +478,21 @@ struct MyRenderer
 
     void setup(const MyModel& m, float screen_width, float screen_height)
     {
-        scale_factor = std::max(
-            m.height / (screen_height - 2*margin),
-            m.width / (screen_width - margin - x0)
-        );
+        scale_factor = std::min(screen_height / m.height, screen_width / m.width);
 
-        gradient_radius = m.R_atom / scale_factor * gradient_scale;
-        window_width = m.width / scale_factor;
-        window_height = m.height / scale_factor;
-
-        //y0 += -window_height/2;
-        x0 += (window_width - screen_width)/2;
+        gradient_radius = m.R_atom * scale_factor * gradient_scale;
+        window_width = m.width * scale_factor;
+        window_height = m.height * scale_factor;
 
         setup_grid_cells(m);
 
-        background = {-window_width/2 + x0, -window_height/2 + y0,
-                        window_width, window_height};
+        background = {0, 0, window_width, window_height};
     }
 
     Vector2 atom_pos_to_screen(Vector2 p)
     {
-        float x = p.x/scale_factor - window_width/2 - gradient_radius + x0;
-        float y = -p.y/scale_factor + window_height/2 - gradient_radius + y0;
+        float x = p.x * scale_factor - gradient_radius;
+        float y = -p.y * scale_factor + window_height - gradient_radius;
         return {x, y};
     }
 
@@ -530,10 +535,10 @@ struct MyRenderer
     Rectangle to_screen(Rectangle r)
     {
         return {
-            r.x / scale_factor - window_width/2 + x0,
-            -r.y / scale_factor + window_height/2 - r.height/scale_factor + y0,
-            r.width / scale_factor,
-            r.height / scale_factor
+            r.x * scale_factor,
+            window_height - (r.y + r.height) * scale_factor,
+            r.width * scale_factor,
+            r.height * scale_factor
         };
     }
 
@@ -604,22 +609,27 @@ struct MyRenderer
 //TODO: record coordinates track of some atom
 //TODO: random generator
 
-//TODO: cmdline args
+//TODO: imgui
 
 //TODO: cylinder and tor surface
+
+//TODO: window resize and fullscreen
 
 
 int main(void)
 {
-    MyModel model;
+    MyModel model({100, 100});
 
     model.basic_setup();
 
+    model.top_exchange_temperature = false;
+    model.bottom_exchange_temperature = false;
+    model.max_atoms_count = 1000;
+
     //model.setup_debug();
     model.generate_random(1000);
-    model.g_acc = {0, -9.81 * 10};
-    //model.new_atoms_per_second = 10;
-    //model.max_atoms_count = 10000;
+    //model.g_acc = {0, -9.81 * 40};
+    //model.new_atoms_rate = 1.0;
 
     MyRenderer r;
     r.draw_density_map = false;
@@ -628,22 +638,28 @@ int main(void)
 
     int screen_width = 1200;
     int screen_height = 700;
-    int max_fps = 60;
+    int max_fps = 10000;
+    IntRectangle viewport{200, 10, screen_width-210, screen_height-20};
+    Rectangle view = viewport;
+    Vector2 view_offset{ view.x, view.y };
 
     InitWindow(screen_width, screen_height, "2D atomic gas");
 
-    r.setup(model, screen_width, screen_height);
+    r.setup(model, viewport.width, viewport.height);
     r.prepare();
 
     Camera2D camera = { {0} };
     camera.target = {0, 0};
-    camera.offset = (Vector2){ screen_width / 2.0f, screen_height / 2.0f };
+    camera.offset = view_offset;
     camera.rotation = 0.0f;
     camera.zoom = 1.0f;
 
     SetTargetFPS(max_fps);
 
     Clock::time_point last_ts = Clock::now();
+
+    Vector2 mouse_drag_from = {0, 0};
+    bool drag_on = false;
 
     while (!WindowShouldClose()) {
         Clock::time_point now = Clock::now();
@@ -652,15 +668,41 @@ int main(void)
 
         model.update(dt.count());
 
+        float wheel = GetMouseWheelMove();
+        Vector2 mouse = GetMousePosition();
+        if (wheel != 0.0 && CheckCollisionPointRec(mouse, view)) {
+            Vector2 target_mouse = GetScreenToWorld2D(mouse, camera);
+            camera.target = target_mouse;
+            camera.offset = mouse;
+            camera.zoom += wheel * 0.05;
+        }
+        if (drag_on) {
+            Vector2 move = mouse - mouse_drag_from;
+            camera.offset += move;
+            mouse_drag_from = mouse;
+        }
+        if (IsMouseButtonDown(MOUSE_LEFT_BUTTON) && !drag_on) {
+            mouse_drag_from = mouse;
+            drag_on = true;
+        }
+        if (!IsMouseButtonDown(MOUSE_LEFT_BUTTON) && drag_on) {
+            drag_on = false;
+        }
+
         BeginDrawing();
 
         ClearBackground(BLACK);
 
         BeginMode2D(camera);
+        BeginScissorMode(viewport.x, viewport.y, viewport.width, viewport.height);
+        ClearBackground(DARKGRAY);
 
         r.render(model);
 
+        DrawCircle(0, 0, 20, GREEN);
+
         EndMode2D();
+        EndScissorMode();
 
         DrawFPS(20, 5);
         r.render_text(model);

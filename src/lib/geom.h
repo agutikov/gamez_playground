@@ -4,6 +4,23 @@
 #include "raymath.h"
 #include <vector>
 
+struct IntRectangle
+{
+    int x;
+    int y;
+    int width;
+    int height;
+
+    operator Rectangle() const
+    {
+        return {
+            float(x),
+            float(y),
+            float(width),
+            float(height)
+        };
+    }
+};
 
 
 struct Block
