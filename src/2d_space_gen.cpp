@@ -7,6 +7,7 @@
 #include <limits>
 #include <exception>
 #include <iostream>
+#include <cmath>
 
 #include "raylib.h"
 #include "raymath.h"
@@ -22,6 +23,8 @@
 struct far_stars_cfg
 {
     bool enable;
+    float brightness;
+    float density;
 };
 
 struct perlin_cfg
@@ -35,19 +38,23 @@ struct perlin_cfg
 struct nebulae_cfg
 {
     bool enable;
-    uint64_t seed;
     perlin_cfg perlin;
-    size_t min_count;
-    size_t max_count;
+    size_t count;
+    float density;
+    float falloff;
 };
 
 struct close_stars_cfg
 {
     bool enable;
+    float density;
+    float core_falloff;
+    float halo_falloff;
 };
 
 struct space_cfg
 {
+    uint64_t seed;
     far_stars_cfg far_stars;
     nebulae_cfg nebulae;
     close_stars_cfg close_stars;
@@ -60,62 +67,54 @@ void generate_far_stars(Image* img, far_stars_cfg cfg)
         return;
     }
 
+    size_t count = img->width * img->height * cfg.density;
+
+    while (count--) {
+        Vector2 pos = rand_vec(img->width, img->height);
+
+        float v = std::log(1 - randrange(0.0000001, 0.9999999)) * -cfg.brightness;
+        Color c = ColorFromNormalized(Vector4{v, v, v, 1.0});
+
+        ImageDrawPixelV(img, pos, c);
+    }
 }
 
 
-int randrange(int from, int to)
+struct perlin_2d
 {
-    static std::random_device rand_dev;
-    static std::default_random_engine dre(rand_dev());
+    perlin_2d(perlin_cfg cfg, float scale) :
+        cfg(cfg),
+        perlin(cfg.seed),
+        scale(scale)
+    {}
 
-    std::uniform_int_distribution<int> uniform_dist(from, to);
-    return uniform_dist(dre);
-}
+    float operator()(Vector2 p) const
+    {
+        return perlin.octave2D_01(p.x * scale, p.y * scale, cfg.octaves, cfg.persistence);
+    }
 
-Color rand_color()
-{
-    uint32_t value = randrange(0, (0x1 << 24) - 1);
-    return {
-        uint8_t(value),
-        uint8_t(value >> 8),
-        uint8_t(value >> 16),
-        255
-    };
-}
-
-Vector2 rand_vec(float x_max, float y_max)
-{
-    return {
-        randrange(0.0f, x_max),
-        randrange(0.0f, y_max)
-    };
-}
-
-Rectangle ImageRec(const Image& img)
-{
-    return { 0, 0, float(img.width), float(img.height)};
-}
-
+    const perlin_cfg cfg;
+    const siv::PerlinNoise perlin;
+    const float scale;
+};
 
 void image_generate_perlin(Image* img, perlin_cfg cfg)
 {
-    const siv::PerlinNoise perlin{cfg.seed};
-
-    const double fx = (cfg.frequency / img->width);
-    const double fy = (cfg.frequency / img->height);
+    //const float scale = std::min((cfg.frequency / img->width), (cfg.frequency / img->height));
+    const float scale = 1.0f / 200;
+    perlin_2d perlin(cfg, scale);
 
     for (int y = 0; y < img->height; y++) {
         for (int x = 0; x < img->width; x++) {
-            float noise = perlin.octave2D_01((x * fx), (y * fy), cfg.octaves, cfg.persistence);
+            Vector2 p{float(x), float(y)};
+            float noise = perlin(p);
+            //noise = pow(noise + 0.2, 5);
             Color c = Fade(WHITE, noise);
             ImageDrawPixel(img, x, y, c);
         }
     }
 }
 
-//TODO: RenderTexture2D and BeginBlendMode
-
-//TODO: cache perlin
 
 
 void generate_nebulae(Image* img, nebulae_cfg cfg)
@@ -124,51 +123,92 @@ void generate_nebulae(Image* img, nebulae_cfg cfg)
         return;
     }
 
-    Image perlin = GenImageColor(img->width*2, img->height*2, BLANK);
-    image_generate_perlin(&perlin, cfg.perlin);
-
-    size_t count = randrange(int(cfg.min_count), int(cfg.max_count));
+    size_t count = randrangeint(1, cfg.count);
 
     while (count--) {
-        float density = randrange(0.01f, 0.2f);
-        Color c = rand_color();
-        c = Fade(c, density);
+        Image tmp = GenImageColor(img->width, img->height, BLANK);
 
-        float scale = 1 << randrange(int(1), int(5));
+        Color color = rand_color();
+        Vector2 offset = rand_vec(img->width*100, img->height*100);
 
-        fmt::print("\ndensity={}, scale={}\n", density, scale);
+        float scale = 1.0f / pow(2.0f, randrange(7.0f, 11.0f));
 
-        float sample_width = img->width / scale;
-        float sample_height = img->height / scale;
-        Vector2 offset = rand_vec(
-            float(perlin.width - sample_width),
-            float(perlin.height - sample_height)
-        );
-        Rectangle perlin_sample_rec = {offset.x, offset.y, sample_width, sample_height};
+        perlin_2d perlin(cfg.perlin, scale);
 
-        Image perlin_sample = ImageFromImage(perlin, perlin_sample_rec);
+        for (int y = 0; y < tmp.height; y++) {
+            for (int x = 0; x < tmp.width; x++) {
+                Vector2 p{float(x), float(y)};
+                float noise = perlin(p + offset);
+                noise = pow(noise + cfg.density, cfg.falloff);
+                Color c = Fade(color, noise);
+                ImageDrawPixel(&tmp, x, y, c);
+            }
+        }
 
-        std::cout << "img=" << ImageRec(*img) << std::endl;
-        std::cout << "perlin=" << ImageRec(perlin) << std::endl;
-        std::cout << "perlin_sample_rec=" << perlin_sample_rec << std::endl;
+        ImageDraw(img, tmp, ImageRec(tmp), ImageRec(*img), WHITE);
 
-        ImageResize(&perlin_sample, img->width, img->height);
-
-        std::cout << "perlin_sample=" << ImageRec(perlin_sample) << std::endl;
-
-        ImageDraw(img, perlin_sample, ImageRec(perlin_sample), ImageRec(*img), c);
-
-        UnloadImage(perlin_sample);
+        UnloadImage(tmp);
     }
-
-    UnloadImage(perlin);
 }
+
+
 
 void generate_close_stars(Image* img, close_stars_cfg cfg)
 {
     if (!cfg.enable) {
         return;
     }
+
+    Image tmp = GenImageColor(img->width, img->height, BLANK);
+
+    std::vector<float> R;
+    std::vector<std::pair<Color, Color>> colors;
+    std::vector<Vector2> centers;
+
+    size_t count = img->width * img->height * cfg.density;
+    count = randrangeint(count/2, count);
+
+    for (size_t i = 0; i < count; i++) {
+        Color core_color = ColorAlphaBlend(WHITE, Fade(rand_color(), 0.3), WHITE);
+        Color halo_color = ColorAlphaBlend(WHITE, Fade(rand_color(), 0.4), WHITE);
+        colors.push_back({core_color, halo_color});
+        centers.push_back(rand_vec(img->width, img->height));
+        R.push_back(randrange(0.1, 4.0));
+    }
+
+    for (int y = 0; y < tmp.height; y++) {
+        for (int x = 0; x < tmp.width; x++) {
+            Color c = BLANK;
+            Vector2 p{float(x), float(y)};
+
+            for (size_t i = 0; i < count; i++) {
+                float R_core = R[i];
+
+                auto [core_color, halo_color] = colors[i];
+                Vector2 center = centers[i];
+
+                float d = length(p - center);
+
+                if (d > R_core) {
+                    float e1 = exp(-(d - R_core)*cfg.core_falloff);
+                    float e2 = exp(-(d - R_core)*cfg.halo_falloff);
+
+                    Color c1 = Fade(core_color, e1);
+                    Color c2 = Fade(halo_color, e2);
+                    Color c3 = ColorAlphaBlend(c1, c2, WHITE);
+                    c = ColorAlphaBlend(c, c3, WHITE);
+                } else {
+                    c = core_color;
+                }
+            }
+
+            ImageDrawPixel(&tmp, x, y, c);
+        }
+    }
+
+    ImageDraw(img, tmp, ImageRec(tmp), ImageRec(*img), WHITE);
+
+    UnloadImage(tmp);
 }
 
 Texture2D generate_space(int width, int height, space_cfg cfg)
@@ -179,7 +219,9 @@ Texture2D generate_space(int width, int height, space_cfg cfg)
     generate_nebulae(&img, cfg.nebulae);
     generate_close_stars(&img, cfg.close_stars);
 
-    ImageDrawRectangleLines(&img, {100, 100, 100, 100}, 10, GREEN);
+    //image_generate_perlin(&img, cfg.nebulae.perlin);
+
+    //ImageDrawRectangleLines(&img, {100, 100, 100, 100}, 10, GREEN);
 
     Texture2D txt = LoadTextureFromImage(img);
     UnloadImage(img);
@@ -200,10 +242,16 @@ Texture2D generate_space(int width, int height, space_cfg cfg)
 //TODO: window resize, maximize and back and fullscreen
 //TODO: UI
 
+//TODO: generate local nebulae
+//      - mask with perlin + circle gradient, or ellipse gradient (resized)
+
+
+//TODO: make generated image 100% defined by config
+
 
 int main(void)
 {
-    int screen_width = 600;
+    int screen_width = 800;
     int screen_height = 600;
     int max_fps = 30;
 
@@ -219,33 +267,51 @@ int main(void)
     camera.rotation = 0.0f;
     camera.zoom = 1.0f;
 
-    int background_width = screen_width;
-    int background_height = screen_height;
+    int background_width = 1024;
+    int background_height = 1024;
 
     space_cfg cfg = {
+        .seed = 0,
         .far_stars = {
-            .enable = true
+            .enable = true,
+            .brightness = 0.3,
+            .density = 0.001
         },
         .nebulae = {
             .enable = true,
-            .seed = 0,
             .perlin = {
                 .seed = 0,
                 .octaves = 8,
-                .frequency = 32.0,
+                .frequency = 2.0,
                 .persistence = 0.5
             },
-            .min_count = 1,
-            .max_count = 6
+            .count = 4,
+            .density = 0.1,
+            .falloff = 6,
         },
         .close_stars = {
-            .enable = true
+            .enable = true,
+            .density = 1.0f/100000,
+            .core_falloff = 0.9,
+            .halo_falloff = 0.35,
         }
     };
 
     Texture2D background  = generate_space(background_width, background_height, cfg);
 
     while (!WindowShouldClose()) {
+        if (IsKeyPressed(KEY_F11)) {
+            int display = GetCurrentMonitor();
+            if (IsWindowFullscreen()) {
+                SetWindowSize(screen_width, screen_height);
+                EnableCursor();
+            } else {
+                SetWindowSize(GetMonitorWidth(display), GetMonitorHeight(display));
+                DisableCursor();
+            }
+            ToggleFullscreen();
+        }
+
         if (IsKeyPressed(KEY_SPACE) | IsMouseButtonPressed(MOUSE_RIGHT_BUTTON)) {
             UnloadTexture(background);
             cfg.nebulae.perlin.seed++;

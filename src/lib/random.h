@@ -10,6 +10,15 @@
 #include "raylib.h"
 
 
+int randrangeint(int from, int to)
+{
+    static std::random_device rand_dev;
+    static std::default_random_engine dre(rand_dev());
+
+    std::uniform_int_distribution<int> uniform_dist(from, to);
+    return uniform_dist(dre);
+}
+
 float randrange(float from, float to)
 {
     static std::random_device rand_dev;
@@ -17,6 +26,14 @@ float randrange(float from, float to)
 
     std::uniform_real_distribution<float> uniform_dist(from, to);
     return uniform_dist(dre);
+}
+
+Vector2 rand_vec(float x_max, float y_max)
+{
+    return {
+        randrange(0.0f, x_max),
+        randrange(0.0f, y_max)
+    };
 }
 
 float fit_to_range(float value, std::pair<float, float> range)
@@ -28,6 +45,18 @@ float fit_to_range(float value, std::pair<float, float> range)
     } else {
         return value;
     }
+}
+
+
+Color rand_color()
+{
+    uint32_t value = randrangeint(0, (0x1 << 24) - 1);
+    return {
+        uint8_t(value),
+        uint8_t(value >> 8),
+        uint8_t(value >> 16),
+        255
+    };
 }
 
 

@@ -7,6 +7,13 @@
 #include <iomanip>
 
 
+
+Rectangle ImageRec(const Image& img)
+{
+    return { 0, 0, float(img.width), float(img.height)};
+}
+
+
 struct IntRectangle
 {
     int x;
