@@ -72,6 +72,7 @@ endif
 
 inc_dir = include_directories(
   'src',
+  'subprojects/raygui/src'
 )
 
 sources = files(
@@ -88,12 +89,12 @@ executable('playground',
   name_suffix: name_suffix,
 )
 
-atomic_gas_sources = files(
-  'src/2d_atomic_gas.cpp',
+particles_sources = files(
+  'src/2d_particles.cpp',
 )
 
-executable('2d_atomic_gas',
-  atomic_gas_sources,
+executable('2d_particles',
+  particles_sources,
   c_args: c_args,
   cpp_args: cpp_args,
   dependencies: dependencies,

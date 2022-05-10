@@ -1,19 +1,25 @@
 
-#include "raylib.h"
-#include "raymath.h"
 #include <cstdio>
 #include <vector>
 #include <cmath>
 #include <string>
 #include <sstream>
 #include <chrono>
+#include <limits>
+#include <exception>
+#include <iostream>
+
+#include <fmt/core.h>
+
+#include "raylib.h"
+#include "raymath.h"
+
+#define RAYGUI_IMPLEMENTATION
+#include "raygui.h"
+
+#include "lib/geom.h"
 #include "lib/vector.h"
 #include "lib/random.h"
-#include <limits>
-#include <fmt/core.h>
-#include <exception>
-#include "lib/geom.h"
-#include <iostream>
 
 
 using namespace std::chrono_literals;
@@ -570,7 +576,7 @@ struct MyRenderer
                 }
             }
         } else {
-            DrawRectangleRec(background, LIGHTGRAY);
+            DrawRectangleRec(background, WHITE);
         }
 
         if (draw_atoms) {
@@ -614,6 +620,7 @@ struct MyRenderer
 //TODO: cylinder and tor surface
 
 //TODO: window resize and fullscreen
+//TODO: zoom with zoomed gradients
 
 
 int main(void)
@@ -636,14 +643,15 @@ int main(void)
     r.draw_atoms = true;
     r.gradient_scale = 1.0;
 
-    int screen_width = 1200;
+    int screen_width = 900;
     int screen_height = 700;
-    int max_fps = 10000;
+    int max_fps = 120;
     IntRectangle viewport{200, 10, screen_width-210, screen_height-20};
     Rectangle view = viewport;
     Vector2 view_offset{ view.x, view.y };
 
     InitWindow(screen_width, screen_height, "2D atomic gas");
+    SetExitKey(0);
 
     r.setup(model, viewport.width, viewport.height);
     r.prepare();
@@ -656,17 +664,22 @@ int main(void)
 
     SetTargetFPS(max_fps);
 
-    Clock::time_point last_ts = Clock::now();
+    Clock::time_point last_ts = Clock::now() - 10ms;
 
     Vector2 mouse_drag_from = {0, 0};
     bool drag_on = false;
+
+    bool play = true;
+    Rectangle playbutton_rec{16, 256, 32, 32};
 
     while (!WindowShouldClose()) {
         Clock::time_point now = Clock::now();
         std::chrono::duration<float> dt = now - last_ts;
         last_ts = now;
 
-        model.update(dt.count());
+        if (play) {
+            model.update(dt.count());
+        }
 
         float wheel = GetMouseWheelMove();
         Vector2 mouse = GetMousePosition();
@@ -689,6 +702,10 @@ int main(void)
             drag_on = false;
         }
 
+        if (IsKeyPressed(KEY_SPACE)) {
+            play = !play;
+        }
+
         BeginDrawing();
 
         ClearBackground(BLACK);
@@ -699,10 +716,17 @@ int main(void)
 
         r.render(model);
 
-        DrawCircle(0, 0, 20, GREEN);
-
         EndMode2D();
         EndScissorMode();
+
+        guiIconName play_icon = play
+            ? guiIconName::RAYGUI_ICON_PLAYER_PAUSE
+            : guiIconName::RAYGUI_ICON_PLAYER_PLAY;
+        if (GuiButton(playbutton_rec, GuiIconText(play_icon, ""))) {
+            printf("%s\n", play ? "Pause" : "Play");
+            play = !play;
+        }
+
 
         DrawFPS(20, 5);
         r.render_text(model);
