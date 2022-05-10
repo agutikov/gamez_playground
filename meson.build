@@ -72,7 +72,8 @@ endif
 
 inc_dir = include_directories(
   'src',
-  'subprojects/raygui/src'
+  'subprojects/raygui/src',
+  'subprojects/PerlinNoise'
 )
 
 sources = files(
@@ -102,3 +103,18 @@ executable('2d_particles',
   link_args: link_args,
   name_suffix: name_suffix,
 )
+
+space_gen_sources = files(
+  'src/2d_space_gen.cpp',
+)
+
+executable('2d_space_gen',
+  space_gen_sources,
+  c_args: c_args,
+  cpp_args: cpp_args,
+  dependencies: dependencies,
+  include_directories: inc_dir,
+  link_args: link_args,
+  name_suffix: name_suffix,
+)
+

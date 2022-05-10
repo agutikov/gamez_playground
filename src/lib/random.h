@@ -7,15 +7,16 @@
 #include <tuple>
 #include <limits>
 #include <fmt/core.h>
+#include "raylib.h"
 
 
 float randrange(float from, float to)
 {
     static std::random_device rand_dev;
-    static std::default_random_engine dre1(rand_dev());
+    static std::default_random_engine dre(rand_dev());
 
     std::uniform_real_distribution<float> uniform_dist(from, to);
-    return uniform_dist(dre1);
+    return uniform_dist(dre);
 }
 
 float fit_to_range(float value, std::pair<float, float> range)

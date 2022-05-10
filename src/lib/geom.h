@@ -3,6 +3,9 @@
 #include "raylib.h"
 #include "raymath.h"
 #include <vector>
+#include <sstream>
+#include <iomanip>
+
 
 struct IntRectangle
 {
@@ -67,5 +70,21 @@ std::vector<Block> Box(Vector2 A, float w, float h, Color c, float thickness)
         { hline2rect(A.y, A.x, A.x+w, thickness), GRAY },
         { hline2rect(A.y+h, A.x, A.x+w, thickness), GRAY }
     };
+}
+
+std::ostream& operator<< (std::ostream& os, const Rectangle& r)
+{
+    os << std::fixed << std::setprecision(2)
+        << "{.x=" << r.x << ", .y=" << r.y
+        << " .width=" << r.width << ", .height=" << r.height
+        << "}";
+    return os;
+}
+
+std::string to_string(const Rectangle& r)
+{
+    std::stringstream ss;
+    ss << r;
+    return ss.str();
 }
 

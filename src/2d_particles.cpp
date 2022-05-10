@@ -538,6 +538,14 @@ struct MyRenderer
         selected_atom = create_radial_gradient(selected_color, BLANK, 0.0f);
     }
 
+    void free()
+    {
+        for (auto& txt : atom_colors) {
+            UnloadTexture(txt);
+        }
+        UnloadTexture(selected_atom);
+    }
+
     Rectangle to_screen(Rectangle r)
     {
         return {
@@ -650,7 +658,7 @@ int main(void)
     Rectangle view = viewport;
     Vector2 view_offset{ view.x, view.y };
 
-    InitWindow(screen_width, screen_height, "2D atomic gas");
+    InitWindow(screen_width, screen_height, "2D Particles");
     SetExitKey(0);
 
     r.setup(model, viewport.width, viewport.height);
@@ -733,6 +741,8 @@ int main(void)
 
         EndDrawing();
     }
+
+    r.free();
 
     CloseWindow();
 
